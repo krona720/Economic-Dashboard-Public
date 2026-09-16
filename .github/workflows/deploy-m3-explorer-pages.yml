@@ -1,0 +1,170 @@
+# Publication boundary: this workflow deploys only site/m3_explorer.html.
+# Health verification: require Pages status "succeed", the approved HTTPS URL,
+# the exact content SHA-256, and HTTP 404 at the repository Pages root.
+# Rollback: re-run the last successful reviewed workflow run so GitHub rebuilds
+# its repository-backed artifact, then require every status/health check below.
+# If re-run is unavailable, restore the last reviewed workflow/artifact through
+# a pull request to main and dispatch it with its approved source snapshot SHA.
+# Rollback never authorizes a refresh or a manual edit/upload of the public page.
+name: Deploy reviewed M3 Explorer to GitHub Pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      approved_source_snapshot:
+        description: "Enter approved source snapshot c38d8637553eefeef9073fc9516a6b17615b151a"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: economic-dashboard-public-pages
+  cancel-in-progress: false
+
+env:
+  SOURCE_SNAPSHOT_SHA: c38d8637553eefeef9073fc9516a6b17615b151a
+  ARTIFACT_SHA256: 92957d6d03b8369aa0d0995489c26141e9046e2d7626f47bd2e5531584031220
+  PUBLIC_BASE_URL: https://krona720.github.io/Economic-Dashboard-Public/
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+    steps:
+      - name: Checkout reviewed public repository state
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Confirm approved source snapshot
+        env:
+          APPROVED_SOURCE_SNAPSHOT: ${{ inputs.approved_source_snapshot }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${APPROVED_SOURCE_SNAPSHOT}" = "${SOURCE_SNAPSHOT_SHA}"
+
+      - name: Validate manifest and stage one-file Pages artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          import shutil
+
+          source_sha = "c38d8637553eefeef9073fc9516a6b17615b151a"
+          artifact_sha = "92957d6d03b8369aa0d0995489c26141e9046e2d7626f47bd2e5531584031220"
+          manifest = json.loads(Path("ARTIFACT_MANIFEST.json").read_text(encoding="utf-8"))
+          assert manifest["status"] == "PREPARED_NOT_DEPLOYED"
+          assert manifest["source"] == {
+              "repository": "krona720/economic-data-repository",
+              "commit": source_sha,
+              "path": "m3_explorer.html",
+          }
+          assert manifest["pages"] == {
+              "artifact_directory": "site",
+              "public_path": "/m3_explorer.html",
+              "root_index_present": False,
+              "automatic_refresh": False,
+              "files": ["m3_explorer.html"],
+          }
+          site = Path("site")
+          files = sorted(path.relative_to(site).as_posix() for path in site.rglob("*") if path.is_file())
+          assert files == ["m3_explorer.html"]
+          source = site / "m3_explorer.html"
+          assert hashlib.sha256(source.read_bytes()).hexdigest() == artifact_sha
+          output = Path("_site")
+          output.mkdir()
+          shutil.copyfile(source, output / "m3_explorer.html")
+          assert sorted(path.name for path in output.iterdir()) == ["m3_explorer.html"]
+          assert not (output / "index.html").exists()
+          PY
+          test "$(find _site -type f | wc -l)" -eq 1
+          test -f _site/m3_explorer.html
+          test ! -e _site/index.html
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+
+      - name: Upload reviewed one-file Pages artifact
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: _site
+          retention-days: 30
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      pages: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}m3_explorer.html
+    steps:
+      - name: Deploy reviewed artifact to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+
+      - name: Require successful Pages deployment status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --location \
+            --header 'Accept: application/vnd.github+json' \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/pages/deployments/${GITHUB_SHA}")"
+          test "$(jq -r '.status' <<<"${response}")" = "succeed"
+
+      - name: Require approved URL, HTTPS, TLS, and exact content
+        env:
+          DEPLOYED_BASE_URL: ${{ steps.deployment.outputs.page_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${DEPLOYED_BASE_URL%/}/" = "${PUBLIC_BASE_URL}"
+          curl --fail --silent --show-error --location \
+            --proto '=https' --tlsv1.2 \
+            --retry 6 --retry-all-errors --retry-delay 10 \
+            "${PUBLIC_BASE_URL}m3_explorer.html" \
+            --output deployed-m3-explorer.html
+          echo "${ARTIFACT_SHA256}  deployed-m3-explorer.html" | sha256sum --check --strict
+
+      - name: Require root 404
+        shell: bash
+        run: |
+          set -euo pipefail
+          root_status="$(curl --silent --show-error --location \
+            --proto '=https' --tlsv1.2 \
+            --output root-response.html --write-out '%{http_code}' \
+            "${PUBLIC_BASE_URL}")"
+          test "${root_status}" = "404"
+
+      - name: Record health and rollback guidance
+        shell: bash
+        run: |
+          cat >>"${GITHUB_STEP_SUMMARY}" <<'EOF'
+          ## Verified public artifact
+          - URL: https://krona720.github.io/Economic-Dashboard-Public/m3_explorer.html
+          - Source snapshot: c38d8637553eefeef9073fc9516a6b17615b151a
+          - Content SHA-256: 92957d6d03b8369aa0d0995489c26141e9046e2d7626f47bd2e5531584031220
+          - Repository root: HTTP 404 required
+
+          ## Rollback
+          Re-run the last successful reviewed workflow run and require deployment status,
+          HTTPS content hash, and root-404 checks to pass. If re-run is unavailable,
+          restore the reviewed workflow and artifact through a pull request to `main`,
+          then dispatch that version with its approved source snapshot SHA. Do not edit
+          or upload the public page manually. Rollback does not authorize a refresh.
+          EOF
