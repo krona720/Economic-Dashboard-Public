@@ -1,0 +1,51 @@
+{
+  "schema": "economic-dashboard-public.fixed-artifact.v1",
+  "status": "PREPARED_NOT_DEPLOYED",
+  "source": {
+    "repository": "krona720/economic-data-repository",
+    "commit": "c38d8637553eefeef9073fc9516a6b17615b151a",
+    "path": "m3_explorer.html"
+  },
+  "pages": {
+    "artifact_directory": "site",
+    "public_path": "/m3_explorer.html",
+    "root_index_present": false,
+    "automatic_refresh": false,
+    "files": [
+      "m3_explorer.html"
+    ]
+  },
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 1624,
+      "sha256": "e80eae8b9f02bf1fe2160395afcd840b193b37e661ffa27a9dd2016192869773"
+    },
+    {
+      "path": "PROVENANCE.md",
+      "bytes": 2285,
+      "sha256": "ea457a2664bbf33ce9cefb88b8766b8814abafe90d4ceac21e42780eedade797"
+    },
+    {
+      "path": "site/m3_explorer.html",
+      "bytes": 94668,
+      "sha256": "92957d6d03b8369aa0d0995489c26141e9046e2d7626f47bd2e5531584031220"
+    }
+  ],
+  "repository_allowlist": [
+    "ARTIFACT_MANIFEST.json",
+    "PROVENANCE.md",
+    "README.md",
+    "site/m3_explorer.html"
+  ],
+  "excluded": [
+    "root index",
+    "broader weighted dashboard",
+    "private source repository tree",
+    "internal coordination records",
+    "restricted or order-level data",
+    "credentials",
+    "source workbooks and payloads",
+    "refresh, model, control, and schedule code"
+  ]
+}
